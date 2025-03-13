@@ -1,0 +1,65 @@
+name: 获取并推送 Releases 到仓库
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: 
+
+jobs:
+  get-and-push-releases:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+ 
+      - name: 检出仓库
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: 获取所有 Release 并保存
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            let allReleases = [];
+            let page = 1;
+            const perPage = 100;
+
+            while (true) {
+              const response = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: perPage,
+                page: page,
+              });
+              const releases = response.data;
+              allReleases = allReleases.concat(releases);
+              if (releases.length < perPage) {
+                break;
+              }
+              page++;
+            }
+
+            fs.writeFileSync('releases.json', JSON.stringify(allReleases, null, 2));
+            console.log('已将所有 Release 保存到 releases.json');
+
+      - name: 配置 Git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: 提交并推送 releases.json
+        run: |
+          git branch
+          git add releases.json
+          git commit -m "更新 releases.json，包含最新 Release 数据"
+          git push -f https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:release
